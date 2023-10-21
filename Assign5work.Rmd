@@ -1,0 +1,421 @@
+---
+title: "Decision trees and ensemble methods: what variable best predicts the divorce outcome of couples?"
+author: "Cimmaron Yeoman"
+date: "2023-04-01"
+output: pdf_document
+header-includes:
+- \usepackage{sectsty}
+- \allsectionsfont{\color{magenta}}
+html_document: default
+---
+
+\vspace*{-10mm}
+## Introduction 
+
+Gottman Couples Therapy is a research based form of couples therapy created by Drs. John and Julie Gottman. 
+The method was developed to identify issues in relationships and improve them. This report evaluates 
+a data set containing 54 Divorce Predictor Scale variables, questions derived from Gottman Couples therapy, to 
+assess the relationship of 170 couples across Turkey. Couples included in the study were either divorced or still 
+married, and each pair responded to the predictor variable statements using a 5 level scale (0 = Never, 1 = Seldom, 
+2 = Averagely, 3 = Frequently, 4 = Always). Sample questions include 
+*"I can use negative statements about my spouse’s personality during our discussions (33)"* 
+or *"Our dreams with my spouse are similar and harmonious (15)"*. 
+
+The goal of this report was to identify which variable best predicts divorce using decision trees and other ensemble methods. In the data set, **Class** is the response variable, with 0 = still married and 1 = divorced. 
+Each predictor variable is labeled as 'Atr' with the question number attached at the end (ex. **Atr22**).
+
+**Figure 1**
+
+*Gottman's Four Horsemen of the Apocalypse: relationship edition*
+
+```{r, echo = FALSE, out.width= "60%"}
+library(knitr)
+library(Matrix)
+knitr::include_graphics("Horseman.png")
+```
+
+## Importing the data set
+
+The data set was imported into R Studio and examined for any missing cases. No observations were missing and the data
+set was renamed to **divorce**. 
+
+```{r, message = FALSE, warning = FALSE, results = 'hide'}
+library(readr)
+divorce <- read.csv("divorce_data.csv", header = TRUE)
+divorce <- divorce[complete.cases(divorce), ] 
+```
+
+```{r, include = FALSE}
+set.seed(20)
+train_D <- sample(1:nrow(divorce), 0.5 * nrow(divorce), replace = FALSE)
+test_D <- divorce[-train_D, ]
+train_D <- divorce[train_D, ]
+save(file = "train_D.rda", train_D)
+save(file = "test_D.rda", test_D)
+```
+
+## Test/train and randomization
+
+A test and train set were made and the response **Class** was changed to a factor. Another factor-free test/train 
+set was saved too (hidden and not in the chunk below). 
+
+```{r}
+set.seed(20)
+divorce2 <- divorce
+divorce2$Class <- as.factor(divorce2$Class)
+train2_D <- sample(1:nrow(divorce2), 0.5* nrow(divorce2), replace = FALSE)
+test2_D <- divorce2[-train2_D, ]
+train2_D <- divorce2[train2_D, ]
+save(file = "train2_D.rda", train2_D)
+save(file = "test2_D.rda", test2_D)
+```
+
+```{r, include = FALSE}
+library(ISLR2)
+library(tree)
+library(randomForest)
+library(gbm)
+library(BART)
+```
+\vspace*{-6mm}
+## A Simple decision tree
+
+A basic decision tree or classification tree with three terminal nodes was made. This tree selected the **Atr11** 
+(*"...when I look back, I see that my spouse and I have been in harmony with each other"*), and **Atr20** 
+(*"My spouse and I have similar values in trust"*) predictor variables. The model frequently included **Atr11** even if the test/train data split was loaded with a different seed number. It was not possible to get a tree with more than three terminal nodes. 
+
+```{r, results = 'hide'}
+tree_S <- tree(Class ~., data = train2_D)
+summary(tree_S)
+tree_S
+```
+
+\vspace*{-8mm}
+### A simple tree plotted
+
+**Figure 2**
+\vspace*{-15mm}
+```{r, echo = FALSE, out.width = "70%"}
+plot(tree_S)
+text(tree_S, pretty = 0, col = "mediumorchid4")
+```
+
+\vspace*{-20mm}
+### Training and testing errors:
+
+The training error was **2.35%** and the testing error was **2.35**.
+
+```{r, echo = FALSE, collapse=TRUE}
+tree_S1 <- predict(tree_S, newdata = train2_D, type = "class")
+tabS_train2_D <- table(tree_S1, train2_D$Class)
+tabS_train2_D
+(tabS_train2_D[1, 2] + tabS_train2_D[2, 1]) / length(tree_S1) * 100
+tree_S2 <- predict(tree_S, newdata = test2_D, type = "class")
+tabS_test2_D <- table(tree_S2, test2_D$Class)
+tabS_test2_D
+(tabS_test2_D[1, 2] + tabS_test2_D[2, 1]) / length(tree_S2) * 100
+```
+
+\vspace*{-8mm}
+## Adding variables 
+
+I tried to run a more complicated decision tree but results were not much different, the plot looked
+exactly the same. 
+
+```{r, results = 'hide'}
+tree_C <- tree(Class ~  Atr11 +Atr20 + Atr33 + Atr34 + Atr35 + Atr40 +Atr31 
+               +Atr7 +Atr2, data = train2_D)
+summary(tree_C)
+tree_C
+```
+
+**Figure 3**
+\vspace*{-15mm}
+```{r, echo = FALSE, out.width = "70%"}
+plot(tree_C)
+text(tree_C, pretty = 0, col = "mediumorchid4")
+```
+
+\vspace*{-15mm}
+Adding more variables did not seem to change the decision tree at all. I included **Atr20** and **Atr11** from
+the simple tree, as they were continuously selected, regardless of which variables were added. If they were not included, sometimes the tree would gain another terminal node with duplicated variables or continuously select another variable like **Atr40**. I am assuming the variables that the model repeatedly selects are very relevant to either the outcome of divorce **(1)** or the outcome of still married **(0)**. 
+
+\vspace*{-4mm}
+### Training and testing errors:
+
+The training and testing errors were both **2.35%**. 
+
+```{r, echo = FALSE, collapse = TRUE}
+complex_pred1 <- predict(tree_C, newdata = train2_D, type = "class")
+tab_train2_D <- table(complex_pred1, train2_D$Class)
+tab_train2_D
+(tab_train2_D[1, 2] + tab_train2_D[2, 1]) / length(complex_pred1) * 100
+complex_pred2 <- predict(tree_C, newdata = test2_D, type = "class")
+tab_test2_D <- table(complex_pred2, test2_D$Class)
+tab_test2_D
+(tab_test2_D[1, 2] + tab_test2_D[2, 1]) / length(complex_pred2) * 100
+```
+
+The training and testing errors were exactly the same for the complex decision tree. This indicates that
+the first simple model has already captured the predictor variable most relevant to the divorce outcome response. 
+I will test a few other methods to try and produce a better or different result. 
+
+\vspace*{-6mm}
+## Prune the tree
+
+Using pruning to cross validate and assess the model for error, the number of least selected drops 
+off at **2**. When this is plotted, only **Atr11** is selected. The testing/training error was **2.35%**, once again.
+
+```{r, include = FALSE}
+cv_div <- cv.tree(tree_C, FUN = prune.misclass)
+names(cv_div)
+```
+
+\vspace*{-8mm}
+### Ideal number of leaves 
+
+**Figure 4**
+\vspace*{-15mm}
+```{r, echo = FALSE, out.width = "80%"}
+par(mfrow = c(1, 2))
+plot(cv_div$size, cv_div$dev, type = "b", col = "violetred",
+xlab = "Number of Leaves", ylab = "Deviance")
+plot(cv_div$k, cv_div$dev, type = "b", col = "violetred",
+xlab = "k", ylab = "Deviance")
+```
+
+\vspace*{-10mm}
+### Pruned model
+
+**Figure 5**
+\vspace*{-15mm}
+```{r, echo = FALSE, out.width = "70%"}
+prune_more <- prune.misclass(tree_C, best = 2)
+plot(prune_more)
+text(prune_more, pretty = 0, col = "mediumorchid4")
+```
+
+\vspace*{-20mm}
+### Training and testing errors:
+ 
+The results and code not were included below as they once again, had the exact same errors of **2.35%**.
+
+```{r, results='hide', include = FALSE}
+cv_pred1D <- predict(prune_more, newdata = train2_D, type = "class")
+tab_p_trainD <- table(cv_pred1D, train2_D$Class)
+(tab_p_trainD[1, 2] + tab_p_trainD[2, 1]) / length(cv_pred1D) * 100
+```
+
+```{r, results = 'hide', include = FALSE}
+cv_pred2D <- predict(prune_more, newdata = test2_D, type = "class")
+tab_p_testD <- table(cv_pred2D, test2_D$Class)
+(tab_p_testD[1, 2] + tab_p_testD[2, 1]) / length(cv_pred2D) * 100
+```
+
+\vspace*{-4mm}
+## Random forest
+
+A Random Forest model was attempted with the variables **At11** and **Atr20**, along with a few more of the variables 
+from the more complicated tree tested earlier. 
+
+```{r, results = 'hide'}
+set.seed(20)
+rf_D <- randomForest(Class ~ Atr11 + Atr20 + Atr33 + Atr35 + Atr40 
+                     +Atr31 +Atr2, data = train2_D, mtry = 3, type = "class", 
+                     importance = TRUE)
+```
+
+\vspace*{-8mm}
+### Training and testing errors:
+
+The Random Forest produced a testing and training error of **0%** with these variables, which was strange, and 
+perhaps a sign of underfitting? 
+
+```{r, echo = FALSE, collapse = TRUE}
+pred_Drf1 <- predict(rf_D, newdata = train2_D, type = "class")
+pred_Drf2 <- predict(rf_D, newdata = test2_D, type = "class")
+tab_Drf_train <- table(pred_Drf1, train2_D$Class)
+tab_Drf_train
+(tab_Drf_train[1, 2] + tab_Drf_train[2, 1]) / length(pred_Drf1) * 100
+tab_Drf_test <- table(pred_Drf2, test2_D$Class)
+tab_Drf_test
+(tab_Drf_test[1, 2] + tab_Drf_test[2, 1]) / length(pred_Drf2) * 100
+```
+
+\vspace*{-8mm}
+### Random forest variable importance analysis
+
+The mean decrease accuracy found that model accuracy would decrease by about **18%** for **Atr40** and **Atr11**. The **Atr20** variable followed with just over **12%**. In table below, note these three variables were also listed with
+the highest mean decrease gini scores, emphasizing their importance. If my assumption is correct, the matrix to the
+left of the these scores indicates the mean decrease accuracy for the married **(0)** versus divorce **(1)** outcome. 
+If so, **Atr40** could be the best predictor of the divorce response and **Atr11** could be the best predictor of the 
+still married response. 
+
+```{r, echo = FALSE}
+importance(rf_D, class = TRUE)
+```
+
+**Figure 6**
+\vspace*{-15mm}
+```{r, echo = FALSE, out.width = "70%"}
+varImpPlot(rf_D, class = TRUE, main = NULL, col = c("violetred"))
+```
+
+\vspace*{-8mm}
+## Experimenting with subsets
+
+Variables **Atr40**, **Atr11**, and **Atr20** were all separated into their own subset with the **Class**
+response variable. 
+
+```{r, results = 'hide'}
+Atr40_level <- divorce[, c("Atr40", "Class")]
+Atr11_level <- divorce[, c("Atr11", "Class")]
+Atr20_level <- divorce[, c("Atr20", "Class")]
+```
+
+\vspace*{-5mm}
+When the response variable equaled 1 or divorced, I compared it against the predictor variable scale 
+response of "frequently" **(3)** or more. I did the same for when the response variable equaled 0 or still married,
+comparing it to the predictor variable scale score of "averagely" **(2)** or less. I also tried another scale level
+for the married group of "never" **(0)**. The output provided me with the number of divorced or married couples
+who matched each scale score of the predictor variables.
+
+* The **Atr40** variable was *"We’re just starting a discussion/argument before I know what’s going on"*
+* The **Atr11** variable was 
+*"I think that one day in the future, when I look back, I see that my spouse and I have been in harmony with each other"*. 
+* The **Atr20** variable was *"My spouse and I have similar values in trust"*. 
+
+I will assume these variables are most relevant in the divorce outcome response. 
+
+\vspace*{-4mm}
+### Variable Atr40
+
+There were **82** divorced couples who had sudden arguments averagely or more, and **79** who had arguments frequently
+or more. There were **86** married couples who had sudden arguments averagely or less, and **71** couples who never had sudden arguments. 
+
+```{r, collapse = TRUE}
+#Example of code used to find variables with specific conditions
+sum(Atr40_level$Class == 1 & Atr40_level$Atr40 >=2)
+sum(Atr40_level$Class == 1 & Atr40_level$Atr40 >=3)
+sum(Atr40_level$Class == 0 & Atr40_level$Atr40 <=2)
+sum(Atr40_level$Class == 0 & Atr40_level$Atr40 ==0)
+```
+\vspace*{-8mm}
+### Variable Atr11 
+
+Oddly, there were a large number of divorced couples who answered the question regarding if they felt in harmony, with
+**76** feeling in harmony frequently or more, and **80** feeling in harmony averagely or more. For married couples, **69** answered they never felt in harmony, and in total, **86** couples answered either never or seldom. This seems like the data 
+is incorrect, and not what I would expect, but perhaps something else is going on. Potentially, married couples may not feel in harmony but this fact does not negatively impact their marriage.  
+
+```{r, echo = FALSE, collapse = TRUE}
+sum(Atr11_level$Class == 1 & Atr11_level$Atr11 >=3)
+sum(Atr11_level$Class == 1 & Atr11_level$Atr11 >=2)
+sum(Atr11_level$Class == 0 & Atr11_level$Atr11 <=1)
+sum(Atr11_level$Class == 0 & Atr11_level$Atr11 ==0)
+```
+
+\vspace*{-8mm}
+### Variable Atr20
+
+The **Atr20** variable seemed more relevant for predicting a couple is married, as the **86** married couples 
+answered they seldom or never had the same trust values, with **80**couples never having the same trust values. There were **79** divorced couples who had the same trust values averagely or more, with only **5** couples giving scores of seldom or never. Again, like **Atr11** this was not the expected answer. I see a pattern.
+
+```{r, echo = FALSE, collapse = TRUE}
+sum(Atr20_level$Class == 1 & Atr20_level$Atr20 <=1)
+sum(Atr20_level$Class == 1 & Atr20_level$Atr20 >=2)
+sum(Atr20_level$Class == 0 & Atr20_level$Atr20 <=1)
+sum(Atr20_level$Class == 0 & Atr20_level$Atr20 ==0)
+```
+
+\vspace*{-8mm}
+## BART 
+
+The train/test sets were slightly modified before running Bayesian Additive Regression Trees (BART). 
+
+```{r}
+xtrainD <- model.matrix(Class ~ ., data = train2_D)[, -1] # drop intercept 
+xtestD <- model.matrix(Class ~ ., data = test2_D)[, -1] # drop intercept
+ytrainD <- train_D[, "Class"] 
+ytestD <- test_D[, "Class"] 
+```
+
+```{r, cache = TRUE, results = 'hide'}
+set.seed(20)
+Dbart_fit <- gbart(xtrainD, ytrainD, x.test = xtestD, type = "lbart" )
+```
+
+\vspace*{-8mm}
+### Training and testing errors:
+
+BART had a training error of **1.18%** and a testing error of **2.35%**.
+
+```{r, echo = FALSE, include = FALSE}
+pred_Dbart1 <- predict(Dbart_fit, newdata = xtrainD)$prob.test.mean
+pred_Dbart1 <- ifelse(pred_Dbart1 >= 0.5, 1, 0)
+pred_Dbart2 <- predict(Dbart_fit, newdata = xtestD)$prob.test.mean
+pred_Dbart2 <- ifelse(pred_Dbart2 >= 0.5, 1, 0)
+```
+
+```{r, echo = FALSE, collapse = TRUE}
+tab_Dbart_train <- table(pred_Dbart1, ytrainD) 
+tab_Dbart_test <- table(pred_Dbart2, ytestD)  
+(tab_Dbart_train[1, 2] + tab_Dbart_train[2, 1]) / nrow(train_D)*100
+(tab_Dbart_test[1, 2] + tab_Dbart_test[2, 1]) / nrow(test_D)*100
+```
+
+\vspace*{-6mm}
+### How often variables were selected
+
+Interestingly, **Atr26** appeared the most times in the collection of trees from BART, with **Atr40** following 
+closely as second most frequently occurring. All of the variables had a mean occurrence of less than 1.5 though.
+The **Atr11** variable was also selected less frequently at 1.029. Possibly BART does not work here and could
+be underfitting. The results from the original simple trees seem to make the most sense for this data set and
+predicting which variables result in divorce. 
+
+```{r, results = 'hide'}
+ord_B <- order(Dbart_fit$varcount.mean, decreasing = TRUE)
+Dbart_fit$varcount.mean[ord_B]
+```
+
+\vspace*{-8mm}
+## Summarizing results
+
+For the decision trees and ensemble methods tested on the divorce data set split into test/train, these are
+all of the predictions:
+
+```{r, echo = FALSE}
+resultsD<- data.frame(Model = NA, TrainingError = NA, TestingError = NA)
+resultsD[1, ] <- c("Basic Tree", (tabS_train2_D[1, 2] + tabS_train2_D[2, 1]) /
+                   sum(tabS_train2_D) * 100,
+                   (tabS_test2_D[1, 2] + tabS_test2_D[2, 1]) /
+                   sum(tabS_test2_D) * 100)
+resultsD[2, ] <- c("Complex Tree", (tab_train2_D[1, 2] + tab_train2_D[2, 1]) /
+                   sum(tab_train2_D) * 100,
+                   (tab_test2_D[1, 2] + tab_test2_D[2, 1]) /
+                   sum(tab_test2_D) * 100)
+resultsD[3, ] <- c("Pruned Tree", (tab_p_trainD[1, 2] + tab_p_trainD[2, 1]) /
+                   sum(tab_p_trainD) * 100,
+                   (tab_p_testD[1, 2] + tab_p_testD[2, 1]) /
+                   sum(tab_p_testD) * 100)
+resultsD[4, ] <- c("Random Forest", (tab_Drf_train[1, 2] + tab_Drf_train[2, 1]) /
+                   sum(tab_Drf_train) * 100,
+                   (tab_Drf_test[1, 2] + tab_Dbart_test[2, 1]) /
+                   sum(tab_Drf_test) * 100)
+resultsD[5, ] <- c("BART", (tab_Dbart_train[1, 2] + tab_Dbart_train[2, 1]) /
+                   sum(tab_Dbart_train) * 100,
+                   (tab_Dbart_test[1, 2] + tab_Dbart_test[2, 1]) /
+                   sum(tab_Dbart_test) * 100)
+resultsD$TrainingError <- round(as.numeric(resultsD$TrainingError), 1)
+resultsD$TestingError <- round(as.numeric(resultsD$TestingError), 1)
+resultsD
+```
+
+## Conclusion
+
+After testing several different models, it appears that the original simple decision tree probably was the best prediction
+model. I believe **Atr11**, **Atr20**, and **Atr40**, were the questions which best predicted a couples relationship
+class of married or divorced. Overall, **Atr11** was the most relevant and frequently selected predictor variable for 
+predicting the divorce outcome, after analyzing various simple decision trees and their testing/training errors. 
+I believe that BART and Random Forest may be underfitting the data. The data set included answers from couples which I found
+were unexpected for the still married and divorced outcomes, perhaps more context on the couples lifestyle or insight from the
+original study would demystify this. 
